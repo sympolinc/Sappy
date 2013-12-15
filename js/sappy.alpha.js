@@ -2,15 +2,206 @@
     var config={
         HIERARCHY:{
             STRICT:true
+        },
+        HASHKEY:"sappy"
+    };
+    function fixEvent(event){
+        function returnTrue(){return true;}
+        function returnFalse(){return false;}
+        if(!event || ! event.stopPropagation){
+            var old=event || window.event;
+            event={};
+            for(var prop in old){
+                event[prop]=old[prop];
+            }
+            if(!event.target){
+                event.target=event.srcElement || document;
+            }
+            event.relatedTarget=event.fromElement===event.target ?event.toElement:event.fromElement;
+            event.preventDefault=function(){
+                event.returnValue=false;
+                event.isDefaultPrevented=returnTrue;
+            };
+            event.isDefaultPrevented=returnFalse;
+            event.stopPropagation=function(){
+                event.cancelBubble=true;
+                event.isPropagationStopped=returnTrue;
+            };
+            event.isPropagationStopped=returnFalse;
+            event.stopImmediatePropagation=function(){
+                this.isImmediatePropagationStopped=returnTrue;
+                this.stopPropagation();
+            };
+            event.isImmediatePropagationStopped=returnFalse;
+            if(event.clientX!==null){
+                var doc=document.documentElement,body=document.body;
+                event.pageX=event.clientX +
+                (doc && doc.scrollLeft ||body && body.scrollLeft||0)-
+                (doc && doc.clientLeft || body && body.clientLeft||0);
+                event.pageY=event.clientY +
+                (doc && doc.scrollTop ||body && body.scrollTop||0)-
+                (doc && doc.clientTop || body && body.clientTop||0);
+                event.which=event.charCode || event.keyCode;
+                if(event.button !==null){
+                    event.button =(event.button && 1?0 :
+                    (event.button && 4 ? 1:
+                    (event.button && 2 ? 2:0)));
+                }
+            }
+        }
+         return event;
+    }
+    function tidyUp(elem,type){
+        function isEmpty(object){
+            for(var prop in object){
+                return false;
+            }
+            return true;
+        }
+        var data =ev.getData(elem);
+        if(data.handlers[type].length===0){
+            delete data.handlers[type];
+            if(document.removeEventListener){
+                elem.removeEventListener(type,data.dispatcher,false);
+            } else if(document.detachEvent){
+                elem.removeEventListener("on" + type,data.dispatcher);
+            }
+        }
+        if(isEmpty(data.handlers)){
+            delete data.handlers;
+            delete data.dispatcher;
+        }
+        if(isEmpty(data)){
+            ev.removeData(elem);
         }
     }
+    var ev=(function(){
+        var cache={},
+            guidCounter=1,
+            nextGUID=1,
+            ex="data" + (new Date()).getTime();
+            this.getData=function(elem){
+                var guid=elem[ex];
+                if(!guid){
+                    guid=elem[ex]=guidCounter++;
+                    cache[guid]={};
+                }
+                return cache[guid];
+            };
+            this.removeData=function(elem){
+              var guid=elem[ex];
+              if(!guid) return;
+              delete cache[guid];
+              try{
+                  delete elem[ex];
+              }
+              catch(e){
+                  if(elem.removeAttribute){
+                      elem.removeAttribute(ex);
+                  }
+              }
+            };
+            this.addEvent=function(elem,type,func){
+                var data=this.getData(elem);
+                if(!data.handlers)data.handlers={};
+                if(!data.handlers[type])data.handlers[type]=[];
+                if(!func.guid) func.guid=nextGUID++;
+                data.handlers[type].push(func);
+                if(!data.dispatcher){
+                    data.disabled=false;
+                    data.dispatcher=function(event){
+                        if(data.disabled) return;
+                        event=fixEvent(event);
+                        var handlers=data.handlers[event.type];
+                        if(handlers){
+                            for(var i=0;i<handlers.length;i++){
+                                handlers[i].call(elem,event);
+                            }
+                        }
+                    }
+                }
+                if(data.handlers[type].length===1){
+                    if(document.addEventListener){
+                        elem.addEventListener(type,data.dispatcher,false);
+                    } else if(document.attachEvent){
+                        elem.attachEvent("on" + type,data.dispatcher);
+                    }
+                }
+            };
+            this.removeEvent=function(elem,type,fn){
+                var data=this.getData(elem);
+                if(!data.handlers)return;
+                var removeType=function(t){
+                    data.handlers[t]=[];
+                    tidyUp(elem,t);
+                };
+                if(!type){
+                    for(var t in data.handlers) removeType(t);
+                    return;
+                }var handlers=data.handlers[type];
+                if(!handlers)return;
+                if(!fn){
+                    removeType(type);
+                    return;
+                }
+                if(fn.guid){
+                    for(var i=0;i<handlers.length;i++){
+                        if(handlers[i].guid=== fn.guid){
+                            handlers.splice(i--,1);
+                        }
+                    }
+                } else {
+                    var func=fn.toString();
+                    for(var i=0;i<handlers.length;i++){
+                        if(handlers[i].toString()=== func){
+                            handlers.splice(i--,1);
+                        }
+                    }
+                    
+                }
+                tidyUp(elem,type);
+            };
+            this.trigger=function(elem,event){
+                var data=this.getData(elem),parent=elem.parentNode || elem.ownerDocument;
+                if(typeof event ==="string"){
+                    event={type:event,target:elem};
+                }
+                event=fixEvent(event);
+                if(data.dispatcher){
+                    data.dispatcher.call(elem,event);
+                }
+                if(parent &&!event.isPropagationStopped()){
+                    this.trigger(parent,event);
+                } else if(!parent && !event.isDefaultPrevented()){
+                    var targetData=this.getData(event.target);
+                    if(event.target[event.type]){
+                        targetData.disabled=true;
+                        event.target[event.type]();
+                        targetData.disabled=false;
+                    }
+                }
+            };
+            return this;
+    })();
     window.eval = null;
     var expando = function() {
         return (new Date()).getTime();
     },
     attr = function(elem, attr, val) {
         if (!elem || !attr) throw "Error";
-        return val ? (elem[attr] ? elem[attr] = val : elem.setAttribute(attr, val)) : elem[attr] || elem.getAttribute(attr);
+        if(val){
+            if(elem[attr]){
+                elem[attr]=val;
+            } else {
+                elem.setAttribute(attr,val);
+            }
+        } else {
+            if(elem[attr]){
+                return elem[attr];
+            } else {
+                return elem.getAttribute(attr);
+            }
+        }
     },
     style = function(elem, key, val) {
         if (!key || !val) throw "Error";
@@ -24,7 +215,6 @@
     },
     cfg=function(str,val){
         if(typeof str !=="string") {throw "";}
-        console.log(config[str.toUpperCase()])
         if(val!==null && val!=="undefined"){
             config[str.toUpperCase()]=val;
         } else {
@@ -214,14 +404,14 @@
           var a=this.element;
           if(typeof key === "object"){
               for(var k in key){
-                  attr(this.element,k,key[k]);
+                  attr(a,k,key[k]);
               }
           } else if( typeof key==="string"){
               if(value){
                   value=value.toString();
-                  attr(this.element,key,value);
+                  attr(a,key,value);
               } else {
-                  return attr(this.element,key);
+                  return attr(a,key);
               }
           }
           return this;
@@ -230,17 +420,35 @@
             
         },
         id: function(str) {
+            ///<signature>
+            ///<summary>Get the id attribute of the SappyObject's element</summary>
+            ///<returns type="String">The string id attribute of the element</returns>
+            ///</signature>
+            ///<signature>
+            ///<summary>Set the id attribute of the SappyObject's element</summary>
+            ///<param type="String" name="id" optional="false">The value to set the attribute to</param>
+            ///<returns type="SappyObject"> The SappyObject</returns>
+            ///</signature>
             if(str){
                 return this.attr('id',str);
             } else {
-                return this.attr('id')
+                return this.attr('id');
             }
         },
         title: function(str) {
+            ///<signature>
+            ///<summary>Get the title attribute of the SappyObject's element</summary>
+            ///<returns type="String">The string title attribute of the element</returns>
+            ///</signature>
+            ///<signature>
+            ///<summary>Set the title attribute of the SappyObject's element</summary>
+            ///<param type="String" name="id" optional="false">The value to set the attribute to</param>
+            ///<returns type="SappyObject"> The SappyObject</returns>
+            ///</signature>
             if(str){
                 return this.attr('title',str);
             } else {
-                return this.attr('title')
+                return this.attr('title');
             }
         },
         data: function(key,value) {
@@ -310,24 +518,34 @@
             return this;
         },
         bind: function(handler,func) {
-            
+            ev.addEvent(this.element,handler,func);
         },
         unbind: function(handler,func) {
-
+            ev.removeEvent(this.element,handler,func);
         },
         trigger: function(handler) {
-
+            ev.trigger(this.element,handler);
         },
         hide: function() {
-
+            this.trigger('hiding');
+            this.data('old-display',this.element.style.display);
+            this.element.style.display='none';
+            this.data('hidden','hidden');
+            this.trigger('hidden');
         },
         show: function() {
-
+            this.trigger('unhiding');
+            this.element.style.display=this.data('old-display') || '';
+            this.data('hidden','visible');
+            this.trigger('visible');
         },
         toggle: function() {
-
+            if(this.data('hidden')==='hidden'){
+                this.show();
+            } else {
+                this.hide();
+            }
         }
-
     };
 
     function App() {
@@ -351,7 +569,7 @@
             }
         });
         //  
-        var disallowedComponents="ControlGroup Dialog Input Textarea Select CheckSelect Label".split(' ');
+        var disallowedComponents="ControlGroup Dialog Input Textarea Select CheckSelect Label".split(' '),children=[];
         extend(this, all);
         extend(this, {
             "run":function(){
@@ -364,9 +582,18 @@
                         throw "SappyHierarchyException: " + mod.component + " is not allowed as a child of the " + this.component + " context";
                     } else {
                         var a=mod.element;
+                        children.push(mod.SID);
                         this.element.appendChild(a);
                     }
                 }
+                return this;
+            },
+            pick:function(mod){
+                if(inArray(children,mod.SID)){
+                    this.element.removeChild(mod.element);
+                    children.slice(mod.SID);
+                }
+                return this;
             },
             createPanel: Panel,
             createCaptionPanel: CaptionPanel,
@@ -411,6 +638,8 @@
         } else {
             return new Panel();
         }
+        var ex=new expando();
+        Object.defineProperty(this,"SID",{get:function(){return ex; }});
         Object.defineProperty(this, "NS", {
             get: function() {
                 return "Element";
@@ -421,6 +650,9 @@
                 return "Panel";
             }
         });
+        this.element=create('div');
+        var children=[],disallowedContent="".toLowerCase().split(' ');
+        extend(this,all);
         return this;
     }
 
@@ -444,6 +676,9 @@
                 return "CaptionPanel";
             }
         });
+        this.element=create('div');
+        var children=[],disallowedContent="".toLowerCase().split(' ');
+        extend(this,all);
         return this;
     }
 
@@ -467,6 +702,9 @@
                 return "StackPanel";
             }
         });
+        this.element=create('div');
+        var children=[],disallowedContent="".toLowerCase().split(' ');
+        extend(this,all);
         return this;
     }
 
@@ -488,6 +726,26 @@
         Object.defineProperty(this, "component", {
             get: function() {
                 return "Form";
+            }
+        });
+        this.element=create('form');
+        var children=[],disallowedContent="".toLowerCase().split(' ');
+        extend(this,all);
+        extend(this,{
+            add:function(mod){
+                if( mod && mod.isElement && mod.isElement()){
+                    var a=mod.element;
+                    children.push(mod.SID);
+                    this.element.appendChild(a);
+                }
+                return this;
+            },
+            pick:function(mod){
+                if(inArray(children,mod.SID)){
+                    this.element.removeChild(mod.element);
+                    children.slice(mod.SID);
+                }
+                return this;
             }
         });
         return this;
@@ -513,6 +771,32 @@
                 return "Label";
             }
         });
+        this.element=create('label');
+        extend(this,all);
+        var forElems="Input Textarea Select CheckSelect".toLowerCase().split(' ')
+        extend(this,{
+            "for":function(module){
+                if(inArray(forElems,module.component.toLowerCase())){
+                    if(!module.id()){
+                        var bind=expando();
+                        module.id(bind);
+                        this.element.htmlFor=bind;
+                    } else {
+                        this.element.htmlFor=module.id();
+                    }
+                }
+                return this;
+            },
+            display:function(str){
+               var a=this.element;
+               if(str){
+                  a.innerHTML=str;
+               } else {
+                   return a.innerHTML;
+               }
+               return this;
+           }
+        });
         return this;
     }
 
@@ -536,6 +820,7 @@
                 return "Button";
             }
         });
+        extend(this,all);
         return this;
     }
 
@@ -558,6 +843,25 @@
             get: function() {
                 return "Select";
             }
+        });
+        this.element=create('select');
+        var children=[];
+        extend(this,all);
+        extend(this,{
+           addOption:function(text,val) {
+               var opt=create('option');
+               if(!text){throw "";}
+               if(!val){
+                   opt.value=text;
+                   opt.innerHTML=text;
+               } else {
+                   opt.value=val;
+                   opt.innerHTML=text;
+               }
+               children.push(opt);
+               this.appendChild(opt);
+               return this;
+           }
         });
         return this;
     }
@@ -582,6 +886,37 @@
                 return "Link";
             }
         });
+        this.element=create('a');
+        extend(this,all);
+        extend(this,{
+           display:function(str){
+               var a=this.element;
+               if(str){
+                  a.innerHTML=str;
+               } else {
+                   return a.innerHTML;
+               }
+               return this;
+           },
+           href:function(str){
+               var a=this.element;
+               if(str){
+                   a.href=str;
+               } else {
+                   return a.href;
+               }
+               return this;
+           },
+           target:function(str){
+               var a=this.element;
+               if(str){
+                   a.target=str;
+               } else {
+                   return a.target;
+               }
+               return this;
+           }
+        });
         return this;
     }
 
@@ -604,6 +939,13 @@
             get: function() {
                 return "Grid";
             }
+        });
+        extend(this,all);
+        var children=[];
+        extend(this,{
+           createSpan:function(len) {
+               
+           }
         });
         return this;
     }
@@ -628,6 +970,28 @@
                 return "Input";
             }
         });
+        this.element=create('input');
+        extend(this,all);
+        extend(this,{
+            type:function(str) {
+                var a=this.element;
+                if(str){
+                    a.type=str;
+                } else {
+                    return a.type;
+                }
+                return this;
+            },
+            val:function(str){
+                var a=this.element;
+                if(str){
+                    a.value=str;
+                } else {
+                    return a.value;
+                }
+                return this;
+            }
+        });
         return this;
     }
 
@@ -641,6 +1005,8 @@
         } else {
             return new Textarea();
         }
+        var ex=new expando();
+        Object.defineProperty(this,"SID",{get:function(){return ex; }});
         Object.defineProperty(this, "NS", {
             get: function() {
                 return "Element";
@@ -652,6 +1018,17 @@
             }
         });
         extend(this,all);
+        extend(this,{
+           val:function(str){
+               var a=this.element;
+               if(str){
+                   a.innerHTML=str;
+               } else {
+                   return a.innerHTML;
+               }
+               return this;
+           } 
+        });
         this.element=create('textarea');
         return this;
     }
@@ -676,6 +1053,8 @@
                 return "FluidGrid";
             }
         });
+        var children=[];
+        extend(this,all);
         return this;
     }
 
@@ -699,6 +1078,8 @@
                 return "ControlGroup";
             }
         });
+        var children=[];
+        extend(this,all);
         return this;
     }
 
@@ -722,6 +1103,8 @@
                 return "BulletList";
             }
         });
+        var children=[];
+        extend(this,all);
         return this;
     }
 
@@ -745,6 +1128,8 @@
                 return "NumberList";
             }
         });
+        var children=[];
+        extend(this,all);
         return this;
     }
 
@@ -768,6 +1153,8 @@
                 return "List";
             }
         });
+        var children=[];
+        extend(this,all);
         return this;
     }
 

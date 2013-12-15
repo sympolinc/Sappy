@@ -8,7 +8,26 @@
     <body>
         <script type="text/javascript" src="js/sappy.alpha.js"></script>
         <script>
-            ///<reference path="appengine.js"/>   
+            ///<reference path="js/sappy.alpha.js"/>   
+            var app=AppEngine.App();
+            var form=app.createForm();
+            var lbl=app.createLabel();
+            lbl.display("Text Box");
+            var inp=app.createInput();
+            inp.type('date');
+            inp.val('hello');
+            inp.id('textbox');
+            lbl.for(inp);
+            var lnk=app.createLink();
+            lnk.display('Test Link');
+            lnk.href('http://sympol.net');
+            lnk.target('_blank');
+            form.add(lnk);
+            form.add(lbl);
+            form.add(inp);
+            app.add(form);
+            app.size(100,100);
+            app.run();
         </script>
     </body>
 </html>
